@@ -13,6 +13,7 @@
 3. iCPU -- 處理器，相容於 iMac M3 晶片
 4. iBrowser -- 瀏覽器，支援 HTML / CSS / JavaScript 標準
 5. iEDA -- 電子設計工具，支援 iHDL，是融合 rust 與 Verilog 的硬體的描述語言。
+6. iAI -- 人工智慧引擎，包含自動微分與神經網路引擎 (類似 Pytorch)，語言模型 (類似 GPT)。
 
 
 
