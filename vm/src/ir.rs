@@ -68,6 +68,11 @@ pub enum Instr {
     Add { dest: String, lhs: Operand, rhs: Operand },
     Sub { dest: String, lhs: Operand, rhs: Operand },
     Mul { dest: String, lhs: Operand, rhs: Operand },
+    SDiv { dest: String, lhs: Operand, rhs: Operand },
+    SRem { dest: String, lhs: Operand, rhs: Operand },
+    And { dest: String, lhs: Operand, rhs: Operand },
+    Or { dest: String, lhs: Operand, rhs: Operand },
+    Xor { dest: String, lhs: Operand, rhs: Operand },
     ICmp { dest: String, pred: ICmpPred, lhs: Operand, rhs: Operand },
     Call { dest: Option<String>, func: String, args: Vec<Operand> },
     Alloca { dest: String },
@@ -248,6 +253,21 @@ fn parse_instruction(line: &str) -> Result<Instr> {
     if rest.starts_with("mul ") {
         return parse_binop(rest, "mul", |lhs, rhs| Instr::Mul { dest, lhs, rhs });
     }
+    if rest.starts_with("sdiv ") {
+        return parse_binop(rest, "sdiv", |lhs, rhs| Instr::SDiv { dest, lhs, rhs });
+    }
+    if rest.starts_with("srem ") {
+        return parse_binop(rest, "srem", |lhs, rhs| Instr::SRem { dest, lhs, rhs });
+    }
+    if rest.starts_with("and ") {
+        return parse_binop(rest, "and", |lhs, rhs| Instr::And { dest, lhs, rhs });
+    }
+    if rest.starts_with("or ") {
+        return parse_binop(rest, "or", |lhs, rhs| Instr::Or { dest, lhs, rhs });
+    }
+    if rest.starts_with("xor ") {
+        return parse_binop(rest, "xor", |lhs, rhs| Instr::Xor { dest, lhs, rhs });
+    }
     if rest.starts_with("icmp ") {
         return parse_icmp(rest, dest);
     }
@@ -276,7 +296,7 @@ where
         .strip_prefix(op)
         .ok_or_else(|| anyhow::anyhow!("bad binop"))?
         .trim();
-    let after = strip_type_prefix(after)?;
+    let after = strip_type_prefix_any(after)?;
     let (lhs, rhs) = parse_two_operands(after)?;
     Ok(f(lhs, rhs))
 }
@@ -291,7 +311,7 @@ fn parse_icmp(rest: &str, dest: String) -> Result<Instr> {
     let pred = parse_predicate(pred_str)?;
 
     let after_pred = after[pred_str.len()..].trim();
-    let after_pred = strip_type_prefix(after_pred)?;
+    let after_pred = strip_type_prefix_any(after_pred)?;
     let (lhs, rhs) = parse_two_operands(after_pred)?;
     Ok(Instr::ICmp { dest, pred, lhs, rhs })
 }
@@ -299,7 +319,7 @@ fn parse_icmp(rest: &str, dest: String) -> Result<Instr> {
 fn parse_call(rest: &str, dest: Option<String>) -> Result<Instr> {
     // call i32 @add(i32 10, i32 32)
     let after = rest.strip_prefix("call ").unwrap().trim();
-    let after = strip_type_prefix(after)?;
+    let after = strip_type_prefix_any(after)?;
 
     let at_pos = after
         .find('@')
@@ -336,17 +356,27 @@ fn parse_call(rest: &str, dest: Option<String>) -> Result<Instr> {
 fn parse_load(rest: &str, dest: String) -> Result<Instr> {
     // load i32, i32* %ptr
     let after = rest.strip_prefix("load ").unwrap().trim();
-    let after = after.strip_prefix("i32").unwrap_or(after).trim();
-    let after = after.strip_prefix(',').unwrap_or(after).trim();
-    let after = after.strip_prefix("i32*").unwrap_or(after).trim();
-    let ptr = parse_operand(after)?;
+    let (_, ptr_part) = after
+        .split_once(',')
+        .ok_or_else(|| anyhow::anyhow!("bad load"))?;
+    let ptr_part = ptr_part.trim();
+    let ptr_part = ptr_part
+        .strip_prefix("i32*")
+        .or_else(|| ptr_part.strip_prefix("i1*"))
+        .unwrap_or(ptr_part)
+        .trim();
+    let ptr = parse_operand(ptr_part)?;
     Ok(Instr::Load { dest, ptr })
 }
 
 fn parse_phi(rest: &str, dest: String) -> Result<Instr> {
     // phi i32 [ %a, %then ], [ %b, %else ]
     let after = rest.strip_prefix("phi ").unwrap().trim();
-    let after = after.strip_prefix("i32").unwrap_or(after).trim();
+    let after = after
+        .strip_prefix("i32")
+        .or_else(|| after.strip_prefix("i1"))
+        .unwrap_or(after)
+        .trim();
     let mut incomings = Vec::new();
     let mut s = after;
     while let Some(start) = s.find('[') {
@@ -383,15 +413,16 @@ fn parse_ret(line: &str) -> Result<Terminator> {
 fn parse_store(line: &str) -> Result<Instr> {
     // store i32 %v, i32* %ptr
     let after = line.strip_prefix("store ").unwrap().trim();
-    let after = after.strip_prefix("i32").unwrap_or(after).trim();
     let (val_str, rest) = after
         .split_once(',')
         .ok_or_else(|| anyhow::anyhow!("bad store"))?;
     let rest = rest.trim();
     let ptr_str = rest
         .strip_prefix("i32*")
+        .or_else(|| rest.strip_prefix("i1*"))
         .unwrap_or(rest)
         .trim();
+    let val_str = strip_type_prefix_any(val_str.trim())?;
     let value = parse_operand(val_str.trim())?;
     let ptr = parse_operand(ptr_str)?;
     Ok(Instr::Store { value, ptr })
@@ -464,6 +495,14 @@ fn strip_type_prefix(s: &str) -> Result<&str> {
     let ty = it.next().ok_or_else(|| anyhow::anyhow!("missing type"))?;
     let rest = s[ty.len()..].trim();
     Ok(rest)
+}
+
+fn strip_type_prefix_any(s: &str) -> Result<&str> {
+    if s.starts_with("i32 ") || s.starts_with("i1 ") {
+        strip_type_prefix(s)
+    } else {
+        Ok(s)
+    }
 }
 
 fn parse_type(s: &str) -> Result<Type> {

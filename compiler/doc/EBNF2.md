@@ -1,21 +1,16 @@
-# Rust EBNF (Practical Subset)
+# Rust EBNF (Compatible Subset)
 
-This is a mid-sized, practical Rust grammar. It is larger than our toy subset
-but still compact enough to implement. It aims to cover common, everyday Rust
-syntax without the full complexity of the official reference grammar.
+This document defines a **strict Rust subset** intended to be **fully accepted
+by `rustc`** (Rust 2021/2024) when programs follow the listed grammar **and**
+semantic constraints.
 
-The grammar is EBNF-like and intended as a guide for implementation, not an
-authoritative spec.
+The goal is compatibility and implementability, not full language coverage.
 
 ## Lexical
 
 ```ebnf
 Ident       = Letter, { Letter | Digit | "_" } ;
 Int         = Digit, { Digit } ;
-Float       = Digit, { Digit }, ".", Digit, { Digit } ;
-Char        = "'", ( ? any char except ' or \\ ? | Escape ), "'" ;
-String      = "\"", { ? any char except \" or \\ ? | Escape }, "\"" ;
-Escape      = "\\", ( "n" | "r" | "t" | "0" | "\\" | "\"" | "'" ) ;
 
 Letter      = "A".."Z" | "a".."z" | "_" ;
 Digit       = "0".."9" ;
@@ -24,132 +19,98 @@ Digit       = "0".."9" ;
 ## Program
 
 ```ebnf
-Program     = { Item } ;
-Item        = Function | Struct | Enum | Impl | Use | Mod | Const | Static ;
+Program     = { Function } ;
 
-Use         = "use", Path, ";" ;
-Mod         = "mod", Ident, ";" ;
-Const       = "const", Ident, ":", Type, "=", Expr, ";" ;
-Static      = "static", [ "mut" ], Ident, ":", Type, "=", Expr, ";" ;
-```
-
-## Paths
-
-```ebnf
-Path        = PathSeg, { "::", PathSeg } ;
-PathSeg     = Ident | "self" | "super" | "crate" ;
-```
-
-## Types
-
-```ebnf
-Type        = TypePath
-            | "(" [ TypeList ] ")"
-            | "[", Type, ";", Expr, "]"
-            | "&", [ "mut" ], Type
-            | "*", [ "const" | "mut" ], Type
-            | "fn", "(", [ TypeList ], ")", "->", Type ;
-
-TypePath    = Path ;
-TypeList    = Type, { ",", Type } ;
-```
-
-## Functions
-
-```ebnf
-Function    = "fn", Ident, "(", [ ParamList ], ")", [ "->", Type ], Block ;
+Function    = "fn", Ident, "(", [ ParamList ], ")", "->", Type, Block ;
 ParamList   = Param, { ",", Param } ;
-Param       = Pattern, ":", Type ;
-```
+Param       = Ident, ":", Type ;
 
-## Structs / Enums / Impl
-
-```ebnf
-Struct      = "struct", Ident, StructBody, [ ";" ] ;
-StructBody  = "{", [ FieldList ], "}" | "(", [ TypeList ], ")" ;
-FieldList   = Field, { ",", Field }, [ "," ] ;
-Field       = Ident, ":", Type ;
-
-Enum        = "enum", Ident, "{", [ VariantList ], "}" ;
-VariantList = Variant, { ",", Variant }, [ "," ] ;
-Variant     = Ident, [ StructBody ] ;
-
-Impl        = "impl", Type, "{", { ImplItem }, "}" ;
-ImplItem    = Function | Const | TypeAlias ;
-TypeAlias   = "type", Ident, "=", Type, ";" ;
-```
-
-## Patterns
-
-```ebnf
-Pattern     = Ident
-            | "_"
-            | "ref", Ident
-            | "mut", Ident
-            | "&", [ "mut" ], Pattern
-            | "(", [ PatternList ], ")"
-            | Path
-            | Literal ;
-
-PatternList = Pattern, { ",", Pattern } ;
+Type        = "i32" | "bool" ;
 ```
 
 ## Statements and Blocks
 
 ```ebnf
-Block       = "{", { Stmt }, [ Expr ], "}" ;
-Stmt        = LetStmt | ExprStmt | Item ;
+Block       = "{", { Stmt }, Expr, "}" ;
+Stmt        = LetStmt | ExprStmt ;
 
-LetStmt     = "let", Pattern, [ ":", Type ], [ "=", Expr ], ";" ;
+LetStmt     = "let", Ident, ":", Type, "=", Expr, ";" ;
 ExprStmt    = Expr, ";" ;
 ```
 
 ## Expressions (precedence)
 
 ```ebnf
-Expr        = IfExpr | LoopExpr | MatchExpr | OrExpr ;
+Expr        = IfExpr | WhileExpr | OrExpr ;
 
-IfExpr      = "if", Expr, Block, [ "else", ( IfExpr | Block ) ] ;
-LoopExpr    = "loop", Block
-            | "while", Expr, Block
-            | "for", Pattern, "in", Expr, Block ;
-
-MatchExpr   = "match", Expr, "{", { MatchArm }, "}" ;
-MatchArm    = Pattern, [ "if", Expr ], "=>", ( Expr | Block ), [ "," ] ;
+IfExpr      = "if", Expr, Block, "else", Block ;
+WhileExpr   = "while", Expr, Block ;
 
 OrExpr      = AndExpr, { "||", AndExpr } ;
-AndExpr     = EqExpr, { "&&", EqExpr } ;
+AndExpr     = EqExpr,  { "&&", EqExpr } ;
 EqExpr      = CmpExpr, { ( "==" | "!=" ), CmpExpr } ;
 CmpExpr     = AddExpr, { ( "<" | "<=" | ">" | ">=" ), AddExpr } ;
 AddExpr     = MulExpr, { ( "+" | "-" ), MulExpr } ;
 MulExpr     = UnaryExpr, { ( "*" | "/" | "%" ), UnaryExpr } ;
 
-UnaryExpr   = ( "!" | "-" | "*" | "&" | "&mut" ), UnaryExpr
+UnaryExpr   = ( "!" | "-" ), UnaryExpr
             | PostfixExpr ;
 
-PostfixExpr = PrimaryExpr, { PostfixOp } ;
-PostfixOp   = Call | Index | Field | MethodCall ;
+PostfixExpr = PrimaryExpr, { Call } ;
 Call        = "(", [ ExprList ], ")" ;
-Index       = "[", Expr, "]" ;
-Field       = ".", Ident ;
-MethodCall  = ".", Ident, "(", [ ExprList ], ")" ;
 
-PrimaryExpr = Literal
-            | Path
-            | "(", [ ExprList ], ")"
+PrimaryExpr = Int
+            | "true"
+            | "false"
+            | Ident
+            | "(", Expr, ")"
             | Block ;
 
 ExprList    = Expr, { ",", Expr } ;
 ```
 
-## Literals
+## Semantic Constraints (required for rustc compatibility)
 
-```ebnf
-Literal     = Int | Float | Char | String | "true" | "false" ;
+1. **No reassignment**: `let` declares a new immutable binding. No `mut`.
+2. **No shadowing inside the same block**: each `Ident` in `let` is unique per block.
+3. **Only `i32` and `bool`** are allowed. No implicit casts.
+4. **Arithmetic ops** (`+ - * / %`) require `i32` operands and yield `i32`.
+5. **Comparison ops** (`== != < <= > >=`) require `i32` operands and yield `bool`.
+6. **Logical ops** (`&& || !`) require `bool` operands and yield `bool`.
+7. **`if` is an expression** and **must include `else`**. Both branches must return the same type.
+8. **`while` is a statement** in this subset: use it only as `ExprStmt` (i.e., `while ... { ... };`).
+9. **Block rule**: a `Block` must end with an expression (no trailing `;`). The value of the block
+   is the value of its final expression.
+10. **Function body**: a function’s block final expression must match the function return type.
+11. **Call resolution**: all called functions are defined in the same program (no extern).
+12. **No recursion limit changes, no macros, no modules, no structs/enums/traits**.
+
+## Examples (valid)
+
+```rust
+fn add(x: i32, y: i32) -> i32 { x + y }
+
+fn main() -> i32 {
+    let a: i32 = 40;
+    let b: i32 = if a > 0 { 2 } else { 0 };
+    add(a, b)
+}
 ```
 
-## Notes
-- This grammar omits macros, lifetimes, generics, traits, attributes, and many
-  advanced features.
-- It is intended for building a compact compiler while still supporting most
-  common Rust syntax found in small programs.
+```rust
+fn main() -> i32 {
+    let i: i32 = 0;
+    while i < 10 { }
+    0
+}
+```
+
+## Examples (invalid in this subset)
+
+```rust
+fn main() -> i32 { let x: i32 = 1; x = 2; x } // reassignment
+```
+
+```rust
+fn main() -> i32 { if true { 1 } else { false } } // branch types differ
+```

@@ -130,19 +130,74 @@ impl<'a> Interpreter<'a> {
                 })?;
                 memory.set_local(dest, Value::I32(lhs.wrapping_mul(rhs)));
             }
+            Instr::SDiv { dest, lhs, rhs } => {
+                let lhs = self.eval_operand(lhs, memory)?.as_i32().ok_or_else(|| {
+                    anyhow::anyhow!("sdiv expects i32 operands")
+                })?;
+                let rhs = self.eval_operand(rhs, memory)?.as_i32().ok_or_else(|| {
+                    anyhow::anyhow!("sdiv expects i32 operands")
+                })?;
+                if rhs == 0 {
+                    bail!("division by zero");
+                }
+                memory.set_local(dest, Value::I32(lhs / rhs));
+            }
+            Instr::SRem { dest, lhs, rhs } => {
+                let lhs = self.eval_operand(lhs, memory)?.as_i32().ok_or_else(|| {
+                    anyhow::anyhow!("srem expects i32 operands")
+                })?;
+                let rhs = self.eval_operand(rhs, memory)?.as_i32().ok_or_else(|| {
+                    anyhow::anyhow!("srem expects i32 operands")
+                })?;
+                if rhs == 0 {
+                    bail!("division by zero");
+                }
+                memory.set_local(dest, Value::I32(lhs % rhs));
+            }
+            Instr::And { dest, lhs, rhs } => {
+                let lhs = self.eval_operand(lhs, memory)?.as_i1().ok_or_else(|| {
+                    anyhow::anyhow!("and expects i1 operands")
+                })?;
+                let rhs = self.eval_operand(rhs, memory)?.as_i1().ok_or_else(|| {
+                    anyhow::anyhow!("and expects i1 operands")
+                })?;
+                memory.set_local(dest, Value::I1(lhs & rhs));
+            }
+            Instr::Or { dest, lhs, rhs } => {
+                let lhs = self.eval_operand(lhs, memory)?.as_i1().ok_or_else(|| {
+                    anyhow::anyhow!("or expects i1 operands")
+                })?;
+                let rhs = self.eval_operand(rhs, memory)?.as_i1().ok_or_else(|| {
+                    anyhow::anyhow!("or expects i1 operands")
+                })?;
+                memory.set_local(dest, Value::I1(lhs | rhs));
+            }
+            Instr::Xor { dest, lhs, rhs } => {
+                let lhs = self.eval_operand(lhs, memory)?.as_i1().ok_or_else(|| {
+                    anyhow::anyhow!("xor expects i1 operands")
+                })?;
+                let rhs = self.eval_operand(rhs, memory)?.as_i1().ok_or_else(|| {
+                    anyhow::anyhow!("xor expects i1 operands")
+                })?;
+                memory.set_local(dest, Value::I1(lhs ^ rhs));
+            }
             Instr::ICmp {
                 dest,
                 pred,
                 lhs,
                 rhs,
             } => {
-                let lhs = self.eval_operand(lhs, memory)?.as_i32().ok_or_else(|| {
-                    anyhow::anyhow!("icmp expects i32 operands")
-                })?;
-                let rhs = self.eval_operand(rhs, memory)?.as_i32().ok_or_else(|| {
-                    anyhow::anyhow!("icmp expects i32 operands")
-                })?;
-                let result = self.eval_icmp(pred, lhs, rhs);
+                let lhs_val = self.eval_operand(lhs, memory)?;
+                let rhs_val = self.eval_operand(rhs, memory)?;
+                let result = match (lhs_val, rhs_val) {
+                    (Value::I32(l), Value::I32(r)) => self.eval_icmp(pred, l, r),
+                    (Value::I1(l), Value::I1(r)) => match pred {
+                        crate::ir::ICmpPred::EQ => l == r,
+                        crate::ir::ICmpPred::NE => l != r,
+                        _ => bail!("icmp predicate not supported for i1"),
+                    },
+                    _ => bail!("icmp operand type mismatch"),
+                };
                 memory.set_local(dest, Value::I1(result));
             }
             Instr::Call { dest, func, args } => {

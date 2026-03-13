@@ -1,4 +1,4 @@
-use crate::ast::{BinOp, Expr, Function, Param, Program, Stmt, Type};
+use crate::ast::{BinOp, Expr, Function, Param, Program, Stmt, Type, UnaryOp};
 use crate::lexer::Token;
 use anyhow::{bail, Result};
 
@@ -97,7 +97,10 @@ impl<'a> Parser<'a> {
         if matches!(self.peek(), Some(Token::If)) {
             return self.parse_if();
         }
-        self.parse_cmp()
+        if matches!(self.peek(), Some(Token::While)) {
+            return self.parse_while();
+        }
+        self.parse_or()
     }
 
     fn parse_if(&mut self) -> Result<Expr> {
@@ -115,12 +118,74 @@ impl<'a> Parser<'a> {
         })
     }
 
-    fn parse_cmp(&mut self) -> Result<Expr> {
-        let mut expr = self.parse_add()?;
+    fn parse_while(&mut self) -> Result<Expr> {
+        self.expect(&Token::While)?;
+        let cond = self.parse_expr()?;
+        self.expect(&Token::LBrace)?;
+        let body = self.parse_block_body()?;
+        Ok(Expr::While {
+            cond: Box::new(cond),
+            body: Box::new(body),
+        })
+    }
+
+    fn parse_or(&mut self) -> Result<Expr> {
+        let mut expr = self.parse_and()?;
+        loop {
+            if !matches!(self.peek(), Some(Token::OrOr)) {
+                break;
+            }
+            self.next();
+            let rhs = self.parse_and()?;
+            expr = Expr::Binary {
+                op: BinOp::Or,
+                lhs: Box::new(expr),
+                rhs: Box::new(rhs),
+            };
+        }
+        Ok(expr)
+    }
+
+    fn parse_and(&mut self) -> Result<Expr> {
+        let mut expr = self.parse_eq()?;
+        loop {
+            if !matches!(self.peek(), Some(Token::AndAnd)) {
+                break;
+            }
+            self.next();
+            let rhs = self.parse_eq()?;
+            expr = Expr::Binary {
+                op: BinOp::And,
+                lhs: Box::new(expr),
+                rhs: Box::new(rhs),
+            };
+        }
+        Ok(expr)
+    }
+
+    fn parse_eq(&mut self) -> Result<Expr> {
+        let mut expr = self.parse_cmp()?;
         loop {
             let op = match self.peek() {
                 Some(Token::EqEq) => BinOp::Eq,
                 Some(Token::NotEq) => BinOp::Ne,
+                _ => break,
+            };
+            self.next();
+            let rhs = self.parse_cmp()?;
+            expr = Expr::Binary {
+                op,
+                lhs: Box::new(expr),
+                rhs: Box::new(rhs),
+            };
+        }
+        Ok(expr)
+    }
+
+    fn parse_cmp(&mut self) -> Result<Expr> {
+        let mut expr = self.parse_add()?;
+        loop {
+            let op = match self.peek() {
                 Some(Token::Lt) => BinOp::Lt,
                 Some(Token::Le) => BinOp::Le,
                 Some(Token::Gt) => BinOp::Gt,
@@ -158,14 +223,16 @@ impl<'a> Parser<'a> {
     }
 
     fn parse_mul(&mut self) -> Result<Expr> {
-        let mut expr = self.parse_primary()?;
+        let mut expr = self.parse_unary()?;
         loop {
             let op = match self.peek() {
                 Some(Token::Star) => BinOp::Mul,
+                Some(Token::Slash) => BinOp::Div,
+                Some(Token::Percent) => BinOp::Rem,
                 _ => break,
             };
             self.next();
-            let rhs = self.parse_primary()?;
+            let rhs = self.parse_unary()?;
             expr = Expr::Binary {
                 op,
                 lhs: Box::new(expr),
@@ -173,6 +240,28 @@ impl<'a> Parser<'a> {
             };
         }
         Ok(expr)
+    }
+
+    fn parse_unary(&mut self) -> Result<Expr> {
+        match self.peek() {
+            Some(Token::Bang) => {
+                self.next();
+                let expr = self.parse_unary()?;
+                Ok(Expr::Unary {
+                    op: UnaryOp::Not,
+                    expr: Box::new(expr),
+                })
+            }
+            Some(Token::Minus) => {
+                self.next();
+                let expr = self.parse_unary()?;
+                Ok(Expr::Unary {
+                    op: UnaryOp::Neg,
+                    expr: Box::new(expr),
+                })
+            }
+            _ => self.parse_primary(),
+        }
     }
 
     fn parse_primary(&mut self) -> Result<Expr> {
@@ -222,15 +311,23 @@ impl<'a> Parser<'a> {
 
     fn parse_block_body(&mut self) -> Result<Expr> {
         let mut stmts = Vec::new();
-        while matches!(self.peek(), Some(Token::Let)) {
-            stmts.push(self.parse_let_stmt()?);
+        loop {
+            if matches!(self.peek(), Some(Token::Let)) {
+                stmts.push(self.parse_let_stmt()?);
+                continue;
+            }
+            let expr = self.parse_expr()?;
+            if matches!(self.peek(), Some(Token::Semicolon)) {
+                self.next();
+                stmts.push(Stmt::Expr(expr));
+                continue;
+            }
+            self.expect(&Token::RBrace)?;
+            return Ok(Expr::Block {
+                stmts,
+                expr: Box::new(expr),
+            });
         }
-        let expr = self.parse_expr()?;
-        self.expect(&Token::RBrace)?;
-        Ok(Expr::Block {
-            stmts,
-            expr: Box::new(expr),
-        })
     }
 
     fn parse_let_stmt(&mut self) -> Result<Stmt> {

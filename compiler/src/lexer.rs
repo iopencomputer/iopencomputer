@@ -5,6 +5,7 @@ pub enum Token {
     Fn,
     Let,
     If,
+    While,
     Else,
     True,
     False,
@@ -23,6 +24,8 @@ pub enum Token {
     Plus,
     Minus,
     Star,
+    Slash,
+    Percent,
     Eq,
     EqEq,
     NotEq,
@@ -30,6 +33,9 @@ pub enum Token {
     Le,
     Gt,
     Ge,
+    AndAnd,
+    OrOr,
+    Bang,
 }
 
 pub fn lex(source: &str) -> Result<Vec<Token>> {
@@ -52,7 +58,8 @@ pub fn lex(source: &str) -> Result<Vec<Token>> {
                 }
                 continue;
             }
-            bail!("unexpected '/'");
+            tokens.push(Token::Slash);
+            continue;
         }
 
         if ch.is_ascii_digit() {
@@ -84,6 +91,7 @@ pub fn lex(source: &str) -> Result<Vec<Token>> {
                 "fn" => Token::Fn,
                 "let" => Token::Let,
                 "if" => Token::If,
+                "while" => Token::While,
                 "else" => Token::Else,
                 "true" => Token::True,
                 "false" => Token::False,
@@ -132,6 +140,14 @@ pub fn lex(source: &str) -> Result<Vec<Token>> {
                 chars.next();
                 tokens.push(Token::Star);
             }
+            '/' => {
+                chars.next();
+                tokens.push(Token::Slash);
+            }
+            '%' => {
+                chars.next();
+                tokens.push(Token::Percent);
+            }
             '-' => {
                 chars.next();
                 if let Some(&'>') = chars.peek() {
@@ -156,7 +172,7 @@ pub fn lex(source: &str) -> Result<Vec<Token>> {
                     chars.next();
                     tokens.push(Token::NotEq);
                 } else {
-                    bail!("unexpected '!'");
+                    tokens.push(Token::Bang);
                 }
             }
             '<' => {
@@ -175,6 +191,24 @@ pub fn lex(source: &str) -> Result<Vec<Token>> {
                     tokens.push(Token::Ge);
                 } else {
                     tokens.push(Token::Gt);
+                }
+            }
+            '&' => {
+                chars.next();
+                if let Some(&'&') = chars.peek() {
+                    chars.next();
+                    tokens.push(Token::AndAnd);
+                } else {
+                    bail!("unexpected '&'");
+                }
+            }
+            '|' => {
+                chars.next();
+                if let Some(&'|') = chars.peek() {
+                    chars.next();
+                    tokens.push(Token::OrOr);
+                } else {
+                    bail!("unexpected '|'");
                 }
             }
             _ => bail!("unexpected char: {}", ch),

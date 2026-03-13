@@ -1,4 +1,4 @@
-use crate::ast::{BinOp, Expr, Function, Program, Stmt, Type};
+use crate::ast::{BinOp, Expr, Function, Program, Stmt, Type, UnaryOp};
 use anyhow::{bail, Result};
 use std::collections::HashMap;
 
@@ -50,19 +50,48 @@ fn check_expr(
             .get(name)
             .cloned()
             .ok_or_else(|| anyhow::anyhow!("unknown identifier {}", name)),
+        Expr::Unary { op, expr } => {
+            let t = check_expr(expr, locals, fun_types)?;
+            match op {
+                UnaryOp::Neg => {
+                    if t != Type::I32 {
+                        bail!("unary '-' expects i32");
+                    }
+                    Ok(Type::I32)
+                }
+                UnaryOp::Not => {
+                    if t != Type::Bool {
+                        bail!("unary '!' expects bool");
+                    }
+                    Ok(Type::Bool)
+                }
+            }
+        }
         Expr::Binary { op, lhs, rhs } => {
             let l = check_expr(lhs, locals, fun_types)?;
             let r = check_expr(rhs, locals, fun_types)?;
             match op {
-                BinOp::Add | BinOp::Sub | BinOp::Mul => {
+                BinOp::Add | BinOp::Sub | BinOp::Mul | BinOp::Div | BinOp::Rem => {
                     if l != Type::I32 || r != Type::I32 {
                         bail!("arithmetic expects i32");
                     }
                     Ok(Type::I32)
                 }
-                BinOp::Lt | BinOp::Le | BinOp::Gt | BinOp::Ge | BinOp::Eq | BinOp::Ne => {
+                BinOp::Lt | BinOp::Le | BinOp::Gt | BinOp::Ge => {
                     if l != Type::I32 || r != Type::I32 {
                         bail!("comparison expects i32");
+                    }
+                    Ok(Type::Bool)
+                }
+                BinOp::Eq | BinOp::Ne => {
+                    if l != r {
+                        bail!("equality expects same types");
+                    }
+                    Ok(Type::Bool)
+                }
+                BinOp::And | BinOp::Or => {
+                    if l != Type::Bool || r != Type::Bool {
+                        bail!("logical op expects bool");
                     }
                     Ok(Type::Bool)
                 }
@@ -84,6 +113,14 @@ fn check_expr(
             }
             Ok(t)
         }
+        Expr::While { cond, body } => {
+            let c = check_expr(cond, locals, fun_types)?;
+            if c != Type::Bool {
+                bail!("while condition must be bool");
+            }
+            let _ = check_expr(body, locals, fun_types)?;
+            Ok(Type::Unit)
+        }
         Expr::Call { name, args } => {
             let (params, ret) = fun_types
                 .get(name)
@@ -101,14 +138,25 @@ fn check_expr(
         }
         Expr::Block { stmts, expr } => {
             let mut scoped = locals.clone();
+            let mut defined = std::collections::HashSet::new();
             for stmt in stmts {
                 match stmt {
                     Stmt::Let { name, ty, value } => {
+                        if defined.contains(name) {
+                            bail!("duplicate let in same block: {}", name);
+                        }
                         let vty = check_expr(value, &scoped, fun_types)?;
                         if &vty != ty {
                             bail!("let {} type mismatch", name);
                         }
                         scoped.insert(name.clone(), ty.clone());
+                        defined.insert(name.clone());
+                    }
+                    Stmt::Expr(expr) => {
+                        let t = check_expr(expr, &scoped, fun_types)?;
+                        if t == Type::Unit {
+                            continue;
+                        }
                     }
                 }
             }
